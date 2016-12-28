@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -16,8 +17,8 @@ namespace diydistdb
             };
             WriteAsync(nodeUrls, 3, 2, new Thing(3, "foo")).Wait();
             WriteAsync(nodeUrls, 3, 2, new Thing(7, "bar")).Wait();
-            var thing3 = ReadAsync(nodeUrls, 3).Result;
-            var thing7 = ReadAsync(nodeUrls, 7).Result;
+            var thing3 = ReadAsync(nodeUrls, 3, 2, 3).Result;
+            var thing7 = ReadAsync(nodeUrls, 3, 2, 7).Result;
             Console.WriteLine(thing3);
             Console.WriteLine(thing7);
         }
@@ -48,10 +49,38 @@ namespace diydistdb
             }
         }
 
-        private static async Task<Thing> ReadAsync(string[] nodeUrls, int id)
+        private static async Task<Thing> ReadAsync(
+            string[] nodeUrls,
+            int replicationFactor,
+            int readConsistency,
+            int id)
         {
-            // TODO: only works with one node, need to make distributed
-            return await Node.GetThingAsync(nodeUrls[0], id);
+            var things = new List<Thing>();
+
+            foreach (var nodeUrl in nodeUrls.Take(replicationFactor))
+            {
+                try
+                {
+                    var thing = await Node.GetThingAsync(nodeUrl, id);
+                    things.Add(thing);
+                    if (readConsistency <= things.Count)
+                    {
+                        // we got enough successful replies
+                        break;
+                    }
+                }
+                catch (Exception)
+                {
+                    // ignore
+                }
+            }
+
+            if (things.Count < readConsistency)
+            {
+                throw new Exception($"Only read from {things.Count} nodes, needed at least {readConsistency}");
+            }
+
+            return things.OrderBy(thing => thing.Timestamp).Last();
         }
     }
 }
