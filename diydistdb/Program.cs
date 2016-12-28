@@ -15,8 +15,8 @@ namespace diydistdb
                 "http://localhost:9998",
                 "http://localhost:9997"
             };
-            WriteAsync(nodeUrls, 3, 2, new Thing(3, "foo")).Wait();
-            WriteAsync(nodeUrls, 3, 2, new Thing(7, "bar")).Wait();
+            WriteAsync(nodeUrls, 3, 2, new Thing(3, Guid.NewGuid().ToString())).Wait();
+            WriteAsync(nodeUrls, 3, 2, new Thing(7, Guid.NewGuid().ToString())).Wait();
             var thing3 = ReadAsync(nodeUrls, 3, 2, 3).Result;
             var thing7 = ReadAsync(nodeUrls, 3, 2, 7).Result;
             Console.WriteLine(thing3);
@@ -55,19 +55,14 @@ namespace diydistdb
             int readConsistency,
             int id)
         {
-            var things = new List<Thing>();
+            var things = new Dictionary<string, Thing>();
 
             foreach (var nodeUrl in nodeUrls.Take(replicationFactor))
             {
                 try
                 {
                     var thing = await Node.GetThingAsync(nodeUrl, id);
-                    things.Add(thing);
-                    if (readConsistency <= things.Count)
-                    {
-                        // we got enough successful replies
-                        break;
-                    }
+                    things.Add(nodeUrl, thing);
                 }
                 catch (Exception)
                 {
@@ -80,7 +75,18 @@ namespace diydistdb
                 throw new Exception($"Only read from {things.Count} nodes, needed at least {readConsistency}");
             }
 
-            return things.OrderBy(thing => thing.Timestamp).Last();
+            var theThing = things.Values.OrderBy(thing => thing.Timestamp).Last();
+            foreach (var nodeUrl in things.Keys)
+            {
+                var thing = things[nodeUrl];
+                // repair if node has wrong value
+                if (thing == null || thing.Value != theThing.Value)
+                {
+                    await Node.PutThingAsync(nodeUrl, theThing);
+                }
+            }
+
+            return theThing;
         }
     }
 }
